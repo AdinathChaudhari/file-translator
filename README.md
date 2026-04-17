@@ -10,9 +10,10 @@ Paste a folder path, confirm the auto-detected language, edit one sample filenam
 
 - **Auto language detection** — scans filenames and identifies the source language automatically
 - **Pattern learning** — translate one sample, edit it to your liking, and the tool infers rules for the entire folder
-- **Smart cleaning** — strips leading number prefixes, parenthetical tags `(AVC)`, `[1080p]`, underscores, and more — based on what you actually showed it
+- **Tags preserved exactly** — parenthetical tags like `(AVC)`, `[1080p]`, `(BluRay)` are extracted from the original filename and reinserted verbatim — Google never sees them, so casing is never mangled
+- **Smart title casing** — fully-uppercase words like `HD`, `FLAC`, `AVC` are preserved; only regular words are title-cased
 - **Serial numbering** — add `01`, `02`... prefixes, with your choice of padding and separator
-- **Preserves ALL-CAPS tags** — `(AVC)`, `HD`, `FLAC` stay uppercase; only regular words are title-cased
+- **Undo** — after renaming, you're asked if you want to restore everything back to the original names
 - **Conflict guard** — if two files translate to the same name, appends `_2`, `_3` etc. automatically
 - **Works anywhere** — local folders, external drives, NAS — any path your OS can see
 - **50+ languages supported** — powered by Google Translate via `deep-translator`
@@ -38,22 +39,20 @@ Paste a folder path, confirm the auto-detected language, edit one sample filenam
   Pattern Learning
 ────────────────────────────────────────────────────────
 
-  Sample file found:
   Original   : 8103090_Жизнь - это Тайна_(AVC).mkv
 
   Translating sample... done.
-  Translated : 8103090_Life Is A Mystery_(Avc).mkv
+  Translated : 8103090_Life Is A Mystery (AVC).mkv
 
   Edit this to how you want the final filename to look.
-  (Just the name — no extension needed)
+  (Just the name — no extension needed. Press Enter to keep as-is.)
 
   Your version: 01 Life Is A Mystery
 
 ────────────────────────────────────────────────────────
-  Learned pattern:
-  • Strip leading number prefix (e.g. 8103090_)
+  Pattern:
   • Replace underscores with spaces
-  • Remove parenthetical tags e.g. (AVC), [1080p]
+  • Remove parenthetical tags — (AVC), [1080p] etc.
   • Add serial number prefix (starting 01, separator ' ')
 ────────────────────────────────────────────────────────
 
@@ -79,6 +78,8 @@ Paste a folder path, confirm the auto-detected language, edit one sample filenam
 ────────────────────────────────────────────────────────
   Done — 2 file(s), 1 folder(s) renamed.
 ────────────────────────────────────────────────────────
+
+  Undo everything and restore original names? (y / Enter to keep):
 ```
 
 ---
@@ -117,9 +118,9 @@ The tool is fully interactive — no flags or config needed.
 1. **Paste the folder path** — drag and drop from Finder/Explorer into the terminal, or type it manually
 2. **Confirm the detected language** — press Enter to accept, or type the correct language code (e.g. `fr`, `ja`)
 3. **Choose the target language** — defaults to `en` (English)
-4. **Edit the sample** — the tool translates one file and shows you the result; type how you'd actually want it to look
+4. **Edit the sample** — the tool translates one file and shows you the result; type how you'd actually want it to look, or press Enter to keep it as-is
 5. **Review learned rules** — the tool shows what it inferred from your edit; confirm or cancel
-6. **Done** — all files and folders are renamed
+6. **Undo if needed** — after renaming completes, you're offered the option to restore everything
 
 ### Passing a path from an external drive (macOS)
 
@@ -129,16 +130,39 @@ External drives mount under `/Volumes/`. Drag the folder into the terminal when 
 
 ## Pattern learning
 
-When you edit the translated sample, the tool compares your version against the raw translation to infer rules:
+When you edit the translated sample, the tool compares your version to infer rules:
 
 | What you did | Rule learned |
 |---|---|
-| Removed `8103090_` prefix | Strip all leading number prefixes |
-| Removed `(Avc)` or `[1080p]` | Strip all parenthetical/bracket tags |
+| Removed `(AVC)` or `[1080p]` | Strip all parenthetical/bracket tags |
 | Replaced `_` with spaces | Normalize underscores to spaces |
 | Added `01` at the start | Add sequential serial numbers |
 
+If you keep tags in your edit, the rule is: **preserve tags exactly as they appear in the original** — casing and all.
+
 Rules are shown back to you before anything is renamed.
+
+---
+
+## How tags are handled
+
+Tags like `(AVC)`, `[1080p]`, `(BluRay)` are extracted from the **original filename** before sending anything to Google Translate. After translation, they are reinserted verbatim. This means:
+
+- `(AVC)` always stays `(AVC)` — never becomes `(Avc)` or `(avc)`
+- Google never sees or modifies them
+- If you remove a tag in your sample edit, the tool strips all tags from every file
+
+---
+
+## Undo
+
+After all files are renamed, the tool asks:
+
+```
+  Undo everything and restore original names? (y / Enter to keep):
+```
+
+Type `y` to reverse every rename in the correct order — files first, then subfolders, then the top-level folder.
 
 ---
 
@@ -152,10 +176,10 @@ If the tool detects you added a number prefix, it asks:
   [2] Number sequentially starting from your number
 ```
 
-- **Option 1** — files are numbered in the alphabetical order they appear in the folder
+- **Option 1** — files are numbered in alphabetical order of their original names
 - **Option 2** — files are numbered starting from the number you typed (e.g. `01`, `001`)
 
-Padding and separator (space, dot, dash) are inferred from your example.
+Padding and separator (space, dot, dash) are inferred from your example automatically.
 
 ---
 
@@ -172,7 +196,7 @@ Any language supported by Google Translate. Common codes:
 | `hi` | Hindi | `es` | Spanish |
 | `it` | Italian | `tr` | Turkish |
 
-Pass `auto` as the source language to let Google detect it. The tool does this automatically.
+The tool auto-detects the source language — you just confirm or correct it.
 
 ---
 
@@ -185,13 +209,16 @@ Yes — any path your OS can access works. Drag the folder into the terminal whe
 A `_2`, `_3` suffix is appended automatically so nothing is overwritten.
 
 **Does it rename the top-level folder I pass in?**
-Yes — after all inner files and subfolders are done, the root folder itself is also renamed.
+Yes — after all inner files and subfolders are renamed, the root folder itself is renamed last.
 
 **Can I skip the pattern learning and just translate?**
-Yes — when the sample is shown, press Enter without typing anything to accept the translation as-is with no cleaning rules applied.
+Yes — press Enter when shown the sample to accept the translation as-is with no cleaning rules applied.
 
 **Does it work on Windows?**
-Yes — illegal filename characters are stripped automatically for all platforms.
+Yes — illegal filename characters (`\ / * ? : " < > |`) are stripped automatically.
+
+**What if I don't like the result?**
+Type `y` at the undo prompt after processing and everything is restored to the original names.
 
 ---
 
