@@ -66,13 +66,25 @@ def reinsert_tags(translated_name, tags):
 def smart_title(name):
     """
     Title-case each word but preserve fully-uppercase words (AVC, HD, etc.).
-    Tags are already extracted before this runs, so no parenthetical logic needed.
+    Treats hyphens and underscores as word boundaries so every segment is
+    capitalised independently — e.g. Non-Violence stays Non-Violence and
+    8411305_philosophy becomes 8411305_Philosophy.
     """
-    def fix_word(word):
-        core = word.strip("()[]{}.,!?-_")
+    def cap_segment(seg):
+        """Capitalise one hyphen/underscore-free segment."""
+        core = seg.strip("()[]{}.,!?")
         if core.isupper() and len(core) > 1:
-            return word
-        return word.capitalize()
+            return seg  # preserve ALL-CAPS (AVC, HD, etc.)
+        return seg[0].upper() + seg[1:] if seg else seg
+
+    def fix_word(word):
+        # Split on hyphens and underscores, capitalise each part, rejoin
+        parts = re.split(r"([-_])", word)   # keep the separators
+        return "".join(
+            cap_segment(p) if not re.fullmatch(r"[-_]", p) else p
+            for p in parts
+        )
+
     return " ".join(fix_word(w) for w in name.split())
 
 
