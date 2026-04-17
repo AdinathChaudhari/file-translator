@@ -150,7 +150,7 @@ def format_translated(original_stem, translated_stem, rules, serial_index=None):
 
 # ── Core rename logic ─────────────────────────────────────────────────────────
 
-def translate_and_rename(directory, source_lang, target_lang, rules):
+def translate_and_rename(directory, source_lang, target_lang, rules, rename_root=True):
     translator = GoogleTranslator(source=source_lang, target=target_lang)
     rename_log = []
     renamed_files = 0
@@ -229,28 +229,29 @@ def translate_and_rename(directory, source_lang, target_lang, rules):
                 errors += 1
 
     # --- TOP-LEVEL FOLDER ---
-    parent = os.path.dirname(directory)
-    top_name = os.path.basename(directory)
-    top_to_translate = re.sub(r"^\d+[_\-\.\s]+", "", top_name) if rules["strip_numbers"] else top_name
-    try:
-        translated = translator.translate(top_to_translate)
-        folder_rules = {**rules, "serial_number": False}
-        formatted = format_translated(top_to_translate, translated, folder_rules)
-        new_dir = os.path.join(parent, formatted)
+    if rename_root:
+        parent = os.path.dirname(directory)
+        top_name = os.path.basename(directory)
+        top_to_translate = re.sub(r"^\d+[_\-\.\s]+", "", top_name) if rules["strip_numbers"] else top_name
+        try:
+            translated = translator.translate(top_to_translate)
+            folder_rules = {**rules, "serial_number": False}
+            formatted = format_translated(top_to_translate, translated, folder_rules)
+            new_dir = os.path.join(parent, formatted)
 
-        counter = 2
-        while os.path.exists(new_dir) and new_dir != directory:
-            new_dir = os.path.join(parent, f"{formatted}_{counter}")
-            counter += 1
+            counter = 2
+            while os.path.exists(new_dir) and new_dir != directory:
+                new_dir = os.path.join(parent, f"{formatted}_{counter}")
+                counter += 1
 
-        os.rename(directory, new_dir)
-        rename_log.append((new_dir, directory))
-        print(f"  [FOLDER] {top_name}")
-        print(f"       →   {formatted}")
-        renamed_folders += 1
-    except Exception as e:
-        print(f"  [ERROR]  '{top_name}' — {e}")
-        errors += 1
+            os.rename(directory, new_dir)
+            rename_log.append((new_dir, directory))
+            print(f"  [FOLDER] {top_name}")
+            print(f"       →   {formatted}")
+            renamed_folders += 1
+        except Exception as e:
+            print(f"  [ERROR]  '{top_name}' — {e}")
+            errors += 1
 
     print()
     divider()
@@ -346,6 +347,8 @@ if __name__ == "__main__":
     strip_tags    = ask("Remove parenthetical tags? (e.g. (AVC), [1080p])")
     print()
     add_serial    = ask("Add serial numbers? (e.g. 01 Title, 02 Title...)")
+    print()
+    rename_root   = ask("Rename the top-level folder itself?", default_yes=True)
 
     serial_start    = 1
     serial_padding  = 2
@@ -382,6 +385,7 @@ if __name__ == "__main__":
     print(f"  Strip number prefixes  : {'yes' if strip_numbers else 'no'}")
     print(f"  Strip tags (AVC etc.)  : {'yes' if strip_tags else 'no'}")
     print(f"  Serial numbering       : {'yes, from ' + str(serial_start).zfill(serial_padding) if add_serial else 'no'}")
+    print(f"  Rename top-level folder: {'yes' if rename_root else 'no'}")
     divider("═")
     print()
 
@@ -390,7 +394,7 @@ if __name__ == "__main__":
         print("\n  Cancelled.\n")
         exit(0)
 
-    rename_log = translate_and_rename(target_dir, source_lang, target_lang, rules)
+    rename_log = translate_and_rename(target_dir, source_lang, target_lang, rules, rename_root=rename_root)
 
     # ── Step 6: Offer undo ────────────────────────────────────────────────────
     print()
