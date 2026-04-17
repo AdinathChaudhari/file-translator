@@ -1,6 +1,6 @@
 import os
 import re
-from deep_translator import GoogleTranslator, single_detection
+from deep_translator import GoogleTranslator
 
 # ── Language code → readable name ────────────────────────────────────────────
 LANG_NAMES = {
@@ -37,49 +37,46 @@ def section(title):
     print(f"  {title}")
     divider()
 
+def ask(prompt, default_yes=False):
+    """Ask a yes/no question. Returns True for yes."""
+    hint = "Y/n" if default_yes else "y/N"
+    ans = input(f"  {prompt} [{hint}]: ").strip().lower()
+    if not ans:
+        return default_yes
+    return ans == "y"
 
-# ── Parenthetical extraction ──────────────────────────────────────────────────
 
-# Matches tags like (AVC), [1080p], (BluRay), etc.
+# ── Parenthetical tag handling ────────────────────────────────────────────────
+
 _TAG_RE = re.compile(r"[\(\[][^\)\]]+[\)\]]")
 
 def extract_tags(name):
-    """
-    Pull all parenthetical/bracket tags out of name.
-    Returns (cleaned_name, [tags_in_order]).
-    The cleaned_name has the tag tokens removed but spacing normalised.
-    """
     tags = _TAG_RE.findall(name)
     cleaned = _TAG_RE.sub("", name)
     cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" _-")
     return cleaned, tags
 
-def reinsert_tags(translated_name, tags):
-    """Append the original tags back, space-separated."""
+def reinsert_tags(name, tags):
     if not tags:
-        return translated_name
-    return translated_name.strip() + " " + " ".join(tags)
+        return name
+    return name.strip() + " " + " ".join(tags)
 
 
 # ── Casing ────────────────────────────────────────────────────────────────────
 
 def smart_title(name):
     """
-    Title-case each word but preserve fully-uppercase words (AVC, HD, etc.).
-    Treats hyphens and underscores as word boundaries so every segment is
-    capitalised independently — e.g. Non-Violence stays Non-Violence and
-    8411305_philosophy becomes 8411305_Philosophy.
+    Title-case each word. Treats hyphens and underscores as word boundaries.
+    Preserves fully-uppercase words (AVC, HD, FLAC, etc.).
     """
     def cap_segment(seg):
-        """Capitalise one hyphen/underscore-free segment."""
         core = seg.strip("()[]{}.,!?")
         if core.isupper() and len(core) > 1:
-            return seg  # preserve ALL-CAPS (AVC, HD, etc.)
+            return seg
         return seg[0].upper() + seg[1:] if seg else seg
 
     def fix_word(word):
-        # Split on hyphens and underscores, capitalise each part, rejoin
-        parts = re.split(r"([-_])", word)   # keep the separators
+        parts = re.split(r"([-_])", word)
         return "".join(
             cap_segment(p) if not re.fullmatch(r"[-_]", p) else p
             for p in parts
@@ -92,165 +89,81 @@ def clean_illegal_chars(name):
     return re.sub(r'[\\/*?:"<>|]', "", name)
 
 def clean_trailing_punct(name):
-    """Strip trailing dots, spaces, dashes, underscores left by translation."""
     return name.strip(". _-")
 
 
-# ── Language detection ────────────────────────────────────────────────────────
+# ── File helpers ──────────────────────────────────────────────────────────────
 
-def detect_language(directory):
-    samples = []
-    for entry in os.scandir(directory):
-        name = os.path.splitext(entry.name)[0]
-        if name.strip():
-            samples.append(name)
-        if len(samples) >= 5:
-            break
-    if not samples:
-        return None
-    try:
-        return single_detection(" ".join(samples), api_key=None)
-    except Exception:
-        return None
-
-
-# ── Pattern inference (number stripping removed) ─────────────────────────────
-
-def infer_pattern(translated_sample, user_edited):
-    """
-    Compare translated filename against user's edited version.
-    Infers: underscore normalisation, tag stripping, serial numbering.
-    Number-prefix stripping has been removed — originals are kept as-is.
-    """
-    rules = {
-        "strip_parentheticals": False,
-        "strip_underscores": False,
-        "serial_number": False,
-        "serial_start": 1,
-        "serial_padding": 2,
-        "serial_separator": " ",
-        "serial_order": "sequential",
-    }
-
-    t = translated_sample
-    u = user_edited
-
-    # Detect serial number added by user FIRST so we strip it before comparing.
-    serial_match = re.match(r"^(\d+)([\s\.\-_]+)", u)
-    t_has_long_prefix = bool(re.match(r"^\d{3,}[_\-\.\s]", t))
-
-    if serial_match:
-        serial_digits = serial_match.group(1)
-        serial_in_translated = re.match(r"^" + re.escape(serial_digits) + r"[_\-\.\s]", t)
-        if not serial_in_translated or t_has_long_prefix:
-            rules["serial_number"] = True
-            rules["serial_start"] = int(serial_digits)
-            rules["serial_padding"] = len(serial_digits)
-            rules["serial_separator"] = serial_match.group(2)
-        u_stripped = u[serial_match.end():]
-    else:
-        u_stripped = u
-
-    # Detect: underscores replaced with spaces
-    if "_" in t and "_" not in u_stripped:
-        rules["strip_underscores"] = True
-
-    # Detect: parenthetical tags removed
-    if re.search(r"[\(\[].*?[\)\]]", t) and not re.search(r"[\(\[].*?[\)\]]", u_stripped):
-        rules["strip_parentheticals"] = True
-
-    return rules
-
-
-def describe_rules(rules):
-    lines = []
-    if rules["strip_underscores"]:
-        lines.append("  • Replace underscores with spaces")
-    if rules["strip_parentheticals"]:
-        lines.append("  • Remove parenthetical tags — (AVC), [1080p] etc.")
-    else:
-        lines.append("  • Preserve parenthetical tags exactly as original")
-    if rules["serial_number"]:
-        pad = rules["serial_padding"]
-        sep = repr(rules["serial_separator"])
-        lines.append(f"  • Add serial number prefix (starting {str(rules['serial_start']).zfill(pad)}, separator {sep})")
-    if not lines or lines == ["  • Preserve parenthetical tags exactly as original"]:
-        lines = ["  • Translate and title-case only (tags preserved)"]
-    return lines
-
-
-# ── Apply pattern to a single translated name ─────────────────────────────────
-
-def format_translated(original_name, translated_name, rules, serial_index=None):
-    """
-    Build the final filename stem from the translated text.
-    - Tags are extracted from the ORIGINAL name so their casing is preserved.
-    - The translated portion is title-cased and cleaned.
-    - Tags are reinserted unless the user chose to strip them.
-    """
-    # Extract original tags (preserves AVC, 1080p, etc. exactly)
-    _, original_tags = extract_tags(original_name)
-
-    name = translated_name
-
-    # 1. Normalise underscores
-    if rules["strip_underscores"]:
-        name = name.replace("_", " ")
-
-    # 2. Remove tags from the translated string (Google may have translated them)
-    name, _ = extract_tags(name)
-
-    # 3. Clean illegal chars
-    name = clean_illegal_chars(name)
-
-    # 4. Smart title case
-    name = smart_title(name)
-
-    # 5. Strip trailing punctuation artifacts
-    name = clean_trailing_punct(name)
-
-    # 6. Reinsert original tags unless user said to strip them
-    if not rules["strip_parentheticals"] and original_tags:
-        name = reinsert_tags(name, original_tags)
-
-    # 7. Prepend serial number
-    if rules["serial_number"] and serial_index is not None:
-        pad = rules["serial_padding"]
-        sep = rules["serial_separator"]
-        number = str(serial_index).zfill(pad)
-        name = f"{number}{sep}{name}"
-
-    return name.strip()
-
-
-# ── Get a sample file ─────────────────────────────────────────────────────────
+def is_junk_file(name):
+    """Skip macOS metadata files and other dot-files."""
+    return name.startswith(".") or name.startswith("._")
 
 def get_sample_file(directory):
+    """Return the first non-junk file found in the directory."""
     for entry in sorted(os.scandir(directory), key=lambda e: e.name):
-        if entry.is_file():
+        if entry.is_file() and not is_junk_file(entry.name):
             return entry.name
     for root, _, files in os.walk(directory):
         for f in sorted(files):
-            return f
+            if not is_junk_file(f):
+                return f
     return None
+
+
+# ── Format a single translated stem ──────────────────────────────────────────
+
+def format_translated(original_stem, translated_stem, rules, serial_index=None):
+    """
+    Build the final filename stem.
+    - Tags extracted from original are reinserted verbatim (unless strip_tags).
+    - Number prefix is stripped from original before passing to translator
+      so it never appears in the output (handled in translate_and_rename).
+    """
+    _, original_tags = extract_tags(original_stem)
+
+    name = translated_stem
+
+    # Remove any tags Google may have included in the translation
+    name, _ = extract_tags(name)
+
+    # Clean illegal chars
+    name = clean_illegal_chars(name)
+
+    # Smart title case
+    name = smart_title(name)
+
+    # Strip trailing punctuation artifacts
+    name = clean_trailing_punct(name)
+
+    # Reinsert original tags unless user chose to strip them
+    if not rules["strip_tags"] and original_tags:
+        name = reinsert_tags(name, original_tags)
+
+    # Prepend serial number
+    if rules["serial_number"] and serial_index is not None:
+        pad = rules["serial_padding"]
+        sep = rules["serial_separator"]
+        name = f"{str(serial_index).zfill(pad)}{sep}{name}"
+
+    return name.strip()
 
 
 # ── Core rename logic ─────────────────────────────────────────────────────────
 
 def translate_and_rename(directory, source_lang, target_lang, rules):
     translator = GoogleTranslator(source=source_lang, target=target_lang)
-    rename_log = []   # list of (new_path, original_path) for undo
+    rename_log = []
     renamed_files = 0
     renamed_folders = 0
     errors = 0
 
-    # Pre-build serial map (sorted order)
+    # Pre-build serial map keyed by original path (sorted, skipping junk)
     file_serial_map = {}
     if rules["serial_number"]:
         for root, _, files in os.walk(directory):
-            for idx, f in enumerate(sorted(files)):
-                serial = rules["serial_start"] + idx
-                file_serial_map[os.path.join(root, f)] = serial
+            valid = [f for f in sorted(files) if not is_junk_file(f)]
+            for idx, f in enumerate(valid):
+                file_serial_map[os.path.join(root, f)] = rules["serial_start"] + idx
 
     section(f"Renaming: {os.path.basename(directory)}")
     print()
@@ -259,12 +172,18 @@ def translate_and_rename(directory, source_lang, target_lang, rules):
 
         # --- FILES ---
         for file in sorted(files):
+            if is_junk_file(file):
+                continue
             stem, ext = os.path.splitext(file)
             old_path = os.path.join(root, file)
+
+            # Strip leading number prefix before translating if requested
+            stem_to_translate = re.sub(r"^\d+[_\-\.\s]+", "", stem) if rules["strip_numbers"] else stem
+
             try:
-                translated = translator.translate(stem)
+                translated = translator.translate(stem_to_translate)
                 serial_idx = file_serial_map.get(old_path)
-                formatted = format_translated(stem, translated, rules, serial_index=serial_idx)
+                formatted = format_translated(stem_to_translate, translated, rules, serial_index=serial_idx)
                 new_name = f"{formatted}{ext}"
                 new_path = os.path.join(root, new_name)
 
@@ -285,11 +204,14 @@ def translate_and_rename(directory, source_lang, target_lang, rules):
 
         # --- SUBDIRECTORIES ---
         for folder in dirs:
+            if is_junk_file(folder):
+                continue
             old_path = os.path.join(root, folder)
+            folder_to_translate = re.sub(r"^\d+[_\-\.\s]+", "", folder) if rules["strip_numbers"] else folder
             try:
-                translated = translator.translate(folder)
+                translated = translator.translate(folder_to_translate)
                 folder_rules = {**rules, "serial_number": False}
-                formatted = format_translated(folder, translated, folder_rules)
+                formatted = format_translated(folder_to_translate, translated, folder_rules)
                 new_path = os.path.join(root, formatted)
 
                 counter = 2
@@ -309,10 +231,11 @@ def translate_and_rename(directory, source_lang, target_lang, rules):
     # --- TOP-LEVEL FOLDER ---
     parent = os.path.dirname(directory)
     top_name = os.path.basename(directory)
+    top_to_translate = re.sub(r"^\d+[_\-\.\s]+", "", top_name) if rules["strip_numbers"] else top_name
     try:
-        translated = translator.translate(top_name)
+        translated = translator.translate(top_to_translate)
         folder_rules = {**rules, "serial_number": False}
-        formatted = format_translated(top_name, translated, folder_rules)
+        formatted = format_translated(top_to_translate, translated, folder_rules)
         new_dir = os.path.join(parent, formatted)
 
         counter = 2
@@ -344,12 +267,10 @@ def translate_and_rename(directory, source_lang, target_lang, rules):
 # ── Undo ──────────────────────────────────────────────────────────────────────
 
 def undo_renames(rename_log):
-    """Reverse all renames in reverse order (deepest first → top-level last)."""
     section("Undoing Renames")
     print()
     success = 0
     failed = 0
-    # Reverse so folders are restored after their contents
     for new_path, original_path in reversed(rename_log):
         try:
             os.rename(new_path, original_path)
@@ -385,107 +306,93 @@ if __name__ == "__main__":
         exit(1)
     target_dir = user_input
 
-    # ── Step 2: Detect source language ───────────────────────────────────────
+    # ── Step 2: Languages (asked directly, no auto-detect) ───────────────────
     print()
-    print("  Detecting language...", end="", flush=True)
-    detected = detect_language(target_dir)
-
-    if detected:
-        print(f" done.\n")
-        print(f"  Detected : {lang_label(detected)} ({detected})")
-        print()
-        confirm = input("  Press Enter to confirm, or type the correct code: ").strip()
-        source_lang = confirm if confirm else detected
-    else:
-        print(" could not detect.\n")
-        source_lang = input("  Source language code (e.g. ru, fr, ja): ").strip()
-
-    # ── Step 3: Target language ───────────────────────────────────────────────
+    source_lang = input("  Source language code (e.g. ru, fr, ja, auto): ").strip() or "auto"
     print()
-    target_input = input("  Translate to (code) [default: en]: ").strip()
-    target_lang = target_input if target_input else "en"
+    target_lang = input("  Translate to (code) [default: en]: ").strip() or "en"
 
-    # ── Step 4: Translate a sample and show user ──────────────────────────────
-    section("Pattern Learning")
+    # ── Step 3: Show sample translation ──────────────────────────────────────
+    section("Sample Translation")
     print()
     sample_file = get_sample_file(target_dir)
 
     if sample_file:
-        sample_stem, sample_ext = os.path.splitext(sample_file)
         print(f"  Original   : {sample_file}")
+        sample_stem, sample_ext = os.path.splitext(sample_file)
         print()
         print("  Translating sample...", end="", flush=True)
-
         try:
-            translator_obj = GoogleTranslator(source=source_lang, target=target_lang)
-            translated_sample_raw = translator_obj.translate(sample_stem)
-            # Build display: extract tags from original, title-case translation
-            _, _tags = extract_tags(sample_stem)
-            _trans_clean, _ = extract_tags(translated_sample_raw)
+            _stem_clean = re.sub(r"^\d+[_\-\.\s]+", "", sample_stem)
+            _, _tags = extract_tags(_stem_clean)
+            _trans_raw = GoogleTranslator(source=source_lang, target=target_lang).translate(_stem_clean)
+            _trans_clean, _ = extract_tags(_trans_raw)
             _trans_clean = clean_trailing_punct(smart_title(clean_illegal_chars(_trans_clean)))
-            translated_sample_display = reinsert_tags(_trans_clean, _tags)
-            print(" done.\n")
-            print(f"  Translated : {translated_sample_display}{sample_ext}")
+            sample_translated = reinsert_tags(_trans_clean, _tags)
+            print(f" done.\n")
+            print(f"  Translated : {sample_translated}{sample_ext}")
         except Exception as e:
-            print(f" failed ({e})\n")
-            translated_sample_raw = sample_stem
-            translated_sample_display = sample_stem
-
-        print()
-        print("  Edit this to how you want the final filename to look.")
-        print("  (Just the name — no extension needed. Press Enter to keep as-is.)")
-        print()
-        user_edited = input("  Your version: ").strip()
-
-        if not user_edited:
-            user_edited = translated_sample_display
-
-        rules = infer_pattern(translated_sample_display, user_edited)
-
-        # ── Step 5: Show learned rules ────────────────────────────────────────
-        print()
-        divider()
-        print("  Pattern:")
-        for line in describe_rules(rules):
-            print(line)
-        divider()
-
-        if rules["serial_number"]:
-            print()
-            print("  Serial numbering detected.")
-            print("  [1] Number by folder sort order (alphabetical)")
-            print("  [2] Number sequentially starting from your number")
-            choice = input("  Choose (1/2) [default: 2]: ").strip()
-            rules["serial_order"] = "folder" if choice == "1" else "sequential"
-        else:
-            rules["serial_order"] = "sequential"
-
-        print()
-        go = input("  Apply this pattern to all files? (Enter / n): ").strip().lower()
-        if go == "n":
-            print("\n  Cancelled.\n")
-            exit(0)
-
+            print(f" failed ({e})")
+            sample_translated = sample_stem
     else:
-        print("  No files found — translating names only.")
-        rules = infer_pattern("", "")
-        go = input("\n  Proceed? (Enter / n): ").strip().lower()
-        if go == "n":
-            print("\n  Cancelled.\n")
-            exit(0)
+        print("  No files found in folder.")
 
-    # ── Step 6: Summary ───────────────────────────────────────────────────────
+    # ── Step 4: Options ───────────────────────────────────────────────────────
+    section("Options")
+    print()
+
+    strip_numbers = ask("Strip leading number prefix? (e.g. 8411305_Title → Title)")
+    print()
+    strip_tags    = ask("Remove parenthetical tags? (e.g. (AVC), [1080p])")
+    print()
+    add_serial    = ask("Add serial numbers? (e.g. 01 Title, 02 Title...)")
+
+    serial_start    = 1
+    serial_padding  = 2
+    serial_separator = " "
+
+    if add_serial:
+        print()
+        raw = input("  Start from (e.g. 01, 001, 1) [default: 01]: ").strip()
+        if raw and raw.isdigit():
+            serial_start   = int(raw)
+            serial_padding = len(raw)
+        else:
+            serial_start   = 1
+            serial_padding = 2
+        sep_raw = input("  Separator after number (space / dot / dash) [default: space]: ").strip()
+        serial_separator = {"dot": ". ", "dash": "- ", "space": " "}.get(sep_raw, " ")
+
+    rules = {
+        "strip_numbers":   strip_numbers,
+        "strip_tags":      strip_tags,
+        "serial_number":   add_serial,
+        "serial_start":    serial_start,
+        "serial_padding":  serial_padding,
+        "serial_separator": serial_separator,
+    }
+
+    # ── Step 5: Confirm ───────────────────────────────────────────────────────
     print()
     divider("═")
     print(f"  Folder  : {target_dir}")
     print(f"  From    : {lang_label(source_lang)} ({source_lang})")
     print(f"  To      : {lang_label(target_lang)} ({target_lang})")
+    divider()
+    print(f"  Strip number prefixes  : {'yes' if strip_numbers else 'no'}")
+    print(f"  Strip tags (AVC etc.)  : {'yes' if strip_tags else 'no'}")
+    print(f"  Serial numbering       : {'yes, from ' + str(serial_start).zfill(serial_padding) if add_serial else 'no'}")
     divider("═")
     print()
 
+    go = input("  Start renaming? (Enter to proceed, n to cancel): ").strip().lower()
+    if go == "n":
+        print("\n  Cancelled.\n")
+        exit(0)
+
     rename_log = translate_and_rename(target_dir, source_lang, target_lang, rules)
 
-    # ── Step 7: Offer undo ────────────────────────────────────────────────────
+    # ── Step 6: Offer undo ────────────────────────────────────────────────────
     print()
     undo = input("  Undo everything and restore original names? (y / Enter to keep): ").strip().lower()
     if undo == "y":
