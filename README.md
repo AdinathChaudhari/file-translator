@@ -1,10 +1,12 @@
-# file-translator
+# file-translator — Multilingual File & Folder Renamer
 
-Translate and rename files and folders from any language to any other — in one interactive session.
+**Paste a folder. It learns how you like things renamed.**  
+*An interactive CLI that detects the source language, translates one sample filename, and applies the learned pattern to the whole folder.*
+
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
+![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue)
 
 Paste a folder path, confirm the auto-detected language, edit one sample filename to show how you want things cleaned up, and the tool learns your pattern and applies it to everything.
-
----
 
 ## Features
 
@@ -142,8 +144,6 @@ If you keep tags in your edit, the rule is: **preserve tags exactly as they appe
 
 Rules are shown back to you before anything is renamed.
 
----
-
 ## How tags are handled
 
 Tags like `(AVC)`, `[1080p]`, `(BluRay)` are extracted from the **original filename** before sending anything to Google Translate. After translation, they are reinserted verbatim. This means:
@@ -151,8 +151,6 @@ Tags like `(AVC)`, `[1080p]`, `(BluRay)` are extracted from the **original filen
 - `(AVC)` always stays `(AVC)` — never becomes `(Avc)` or `(avc)`
 - Google never sees or modifies them
 - If you remove a tag in your sample edit, the tool strips all tags from every file
-
----
 
 ## Undo
 
@@ -163,8 +161,6 @@ After all files are renamed, the tool asks:
 ```
 
 Type `y` to reverse every rename in the correct order — files first, then subfolders, then the top-level folder.
-
----
 
 ## Serial numbering
 
@@ -225,8 +221,6 @@ Type `y` at the undo prompt after processing and everything is restored to the o
 ## License
 
 MIT License — see [LICENSE](LICENSE).
-
----
 
 ## Acknowledgements
 
