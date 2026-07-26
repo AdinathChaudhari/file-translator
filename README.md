@@ -6,6 +6,10 @@
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 ![Python 3.8+](https://img.shields.io/badge/python-3.8%2B-blue)
 
+<p align="center">
+  <img src="docs/media/hero.png" alt="file-translator" width="820">
+</p>
+
 Paste a folder path, confirm the auto-detected language, edit one sample filename to show how you want things cleaned up, and the tool learns your pattern and applies it to everything.
 
 ## Features
